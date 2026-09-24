@@ -11,6 +11,9 @@ import {
     ChatInputCommandInteraction,
     Client,
     MessageFlags,
+    SectionBuilder,
+    TextDisplayBuilder,
+    ContainerBuilder,
 } from 'discord.js';
 import { GroceryList, GroceryItem } from '../types/grocery-list.js';
 import { randomUUID } from 'node:crypto';
@@ -19,13 +22,19 @@ const groceryLists = new Map<string, GroceryList>();
 let groceryListCount = 0;
 
 function createAddItemButton(id: string) {
-    return new ActionRowBuilder<ButtonBuilder>()
+    const addItemActionRow = new ActionRowBuilder<ButtonBuilder>()
         .addComponents(
             new ButtonBuilder()
                 .setCustomId(`add_item_button:${id}`)
-                .setLabel('Add item')
+                .setLabel('Add Item(s)')
                 .setStyle(ButtonStyle.Primary),
+            new ButtonBuilder()
+                .setCustomId(`delete_item_button:${id}`)
+                .setLabel('Delete Item(s)')
+                .setStyle(ButtonStyle.Secondary),
         );
+
+    return addItemActionRow;
 }
 
 function createAddItemModal(id: string) {
@@ -34,25 +43,44 @@ function createAddItemModal(id: string) {
         .setTitle('Add Item')
         .addLabelComponents(
             new LabelBuilder()
-                .setLabel('Item name')
-                .setDescription('Enter the item you want to add')
+                .setLabel('Item Name')
+                .setDescription('Enter an Item')
                 .setTextInputComponent(
                     new TextInputBuilder()
                         .setCustomId('item_name')
-                        .setStyle(TextInputStyle.Short)
+                        .setStyle(TextInputStyle.Paragraph)
                         .setPlaceholder('Enter an item')
                         .setRequired(true),
-                ),
+                )
         );
 }
 
-function createItemRow(item: GroceryItem) {
-    return new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder()
-            .setCustomId(`toggle_item_button:${item.id}`)
-            .setLabel(item.completed ? `☑ ${item.name}` : `☐ ${item.name}`)
-            .setStyle(item.completed ? ButtonStyle.Success : ButtonStyle.Secondary)
-    )
+function createItemRow(item: GroceryItem, id: string) {
+    const button = new ButtonBuilder()
+        .setCustomId(`toggle_item_button:${id}:${item.id}`)
+        .setLabel(item.completed ? `☑` : `☐`)
+        .setStyle(item.completed ? ButtonStyle.Success: ButtonStyle.Secondary);
+
+    const section = new SectionBuilder()
+        .addTextDisplayComponents(new TextDisplayBuilder().setContent(`${item.name}`))
+        .setButtonAccessory(button);
+
+    return section;
+}
+
+function createGroceryListContainer(groceryList: GroceryList, id: string) {
+    const container = new ContainerBuilder()
+        .addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(`**${groceryList.title}**`),
+        );
+
+    for (const item of groceryList.items) {
+        container.addSectionComponents(createItemRow(item, id));
+    }
+
+    container.addActionRowComponents(createAddItemButton(id));
+
+    return container;
 }
 
 async function fetchMessageByGroceryList(groceryList: GroceryList, client: Client) {
@@ -66,29 +94,30 @@ async function fetchMessageByGroceryList(groceryList: GroceryList, client: Clien
 }
 
 export async function createGroceryList(chatInputCommandInteraction: ChatInputCommandInteraction) {
+    const groceryList: GroceryList = {
+        title: `Grocery List #${++groceryListCount}`,
+        items: [],
+        messageId: '',
+        channelId: chatInputCommandInteraction.channelId,
+    };
+
     const response = await chatInputCommandInteraction.reply({
-        content: `Grocery List #**${++groceryListCount}**`,
+        flags: MessageFlags.IsComponentsV2,
         components: [
-            createAddItemButton(chatInputCommandInteraction.id)
+            createGroceryListContainer(groceryList, chatInputCommandInteraction.id)
         ],
         withResponse: true,
     });
 
     const messageId = response?.resource?.message?.id;
-    const channelId = chatInputCommandInteraction.channelId;
 
     if (!messageId) {
         throw new Error('Failed to get grocery list messageId');
     }
 
-    const list: GroceryList = {
-        title: `Grocery List #${groceryListCount}`,
-        items: [],
-        messageId,
-        channelId,
-    };
+    groceryList.messageId = messageId;
 
-    groceryLists.set(chatInputCommandInteraction.id, list);
+    groceryLists.set(chatInputCommandInteraction.id, groceryList);
 }
 
 export async function addItemButtonSubmit(buttonInteraction: ButtonInteraction) {
@@ -120,21 +149,24 @@ export async function addItemModalSubmit(modalSubmitInteraction: ModalSubmitInte
         return;
     }
 
-    const itemName = modalSubmitInteraction.fields.getTextInputValue('item_name');
+    const items = modalSubmitInteraction.fields.getTextInputValue('item_name')
+        .split('\n')
+        .map(item => item.trim())
+        .filter(Boolean);
 
-    groceryList.items.push({
-        id: `${id}:${randomUUID()}`, 
-        name: itemName,
-        completed: false,
-    });
+    for (const item of items) {
+        groceryList.items.push({
+            id: `${randomUUID()}`, 
+            name: item,
+            completed: false,
+        });
+    }
 
     const message = await fetchMessageByGroceryList(groceryList, client);
 
     await message.edit({
-        content: `**${groceryList.title}**`,
         components: [
-            ...groceryList.items.map((item) => createItemRow(item)),
-            createAddItemButton(id),
+            createGroceryListContainer(groceryList, id)
         ],
     });
 
@@ -149,12 +181,15 @@ export async function itemRowButtonSubmit(buttonInteraction: ButtonInteraction, 
     const id = split[1];
     const itemId = split[2]
 
+    console.log(id);
+    console.log(itemId);
+
     const groceryList = groceryLists.get(id);
     const groceryItem = groceryList?.items.find((groceryItem) => groceryItem.id === itemId);
 
     if (!groceryList || !groceryItem) { 
         await buttonInteraction.reply({ 
-            content: 'This grocery item no longer exists.', 
+            content: 'Item does not exist', 
             flags: MessageFlags.Ephemeral,
         }); 
         return; 
@@ -165,10 +200,8 @@ export async function itemRowButtonSubmit(buttonInteraction: ButtonInteraction, 
     const message = await fetchMessageByGroceryList(groceryList, client);
 
     await message.edit({
-        content: `**${groceryList.title}**`,
         components: [
-            ...groceryList.items.map((item) => createItemRow(item)),
-            createAddItemButton(id),
+            createGroceryListContainer(groceryList, id)
         ],
     });
 

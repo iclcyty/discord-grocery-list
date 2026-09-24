@@ -15,9 +15,8 @@ client.once('clientReady', () => {
 });
 
 client.on('interactionCreate', async (interaction) => {
-    console.log('interaction seen')
-
     if (interaction.isChatInputCommand()) {
+        console.log(interaction.id)
         if (interaction.commandName === 'grocery-list') {
             await createGroceryList(interaction);
         }
@@ -30,6 +29,7 @@ client.on('interactionCreate', async (interaction) => {
             return;
         }
 
+        console.log(interaction.customId)
         if (interaction.customId.startsWith('add_item_button')) {
             await addItemButtonSubmit(interaction);
             return;
@@ -45,7 +45,8 @@ client.on('interactionCreate', async (interaction) => {
 
     if (interaction.isModalSubmit()) {
         // create list of valid modal submit interactions
-        if (interaction.customId.startsWith('add_item_modal:')) {
+        console.log(interaction.customId)
+        if (interaction.customId.startsWith('add_item_modal')) {
             await addItemModalSubmit(interaction, client);
             return;
         }
