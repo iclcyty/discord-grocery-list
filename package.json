@@ -1,0 +1,38 @@
+{
+	"name": "grocery-list",
+	"version": "1.0.0",
+	"private": true,
+	"description": "grocery list app",
+	"homepage": "https://github.com/iclcyty/discord-grocery-list#readme",
+	"bugs": {
+		"url": "https://github.com/iclcyty/discord-grocery-list/issues"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/iclcyty/discord-grocery-list.git"
+	},
+	"license": "ISC",
+	"author": "",
+	"type": "module",
+	"main": "src/app.ts",
+	"scripts": {
+		"dev": "tsx src/app.ts",
+		"register": "tsx src/deploy-commands.ts"
+	},
+	"dependencies": {
+		"discord.js": "^14.27.0",
+		"dotenv": "^16.0.3",
+		"express": "^4.18.2"
+	},
+	"devDependencies": {
+		"@eslint/js": "^10.0.1",
+		"@types/node": "^26.6.2",
+		"eslint": "^10.11.0",
+		"nodemon": "^3.0.0",
+		"tsx": "^4.23.15",
+		"typescript": "^7.0.2"
+	},
+	"engines": {
+		"node": ">=18.x"
+	}
+}
