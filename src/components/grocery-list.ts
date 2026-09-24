@@ -21,8 +21,8 @@ import { randomUUID } from 'node:crypto';
 const groceryLists = new Map<string, GroceryList>();
 let groceryListCount = 0;
 
-function createAddItemButton(id: string) {
-    const addItemActionRow = new ActionRowBuilder<ButtonBuilder>()
+function createItemButtons(id: string) {
+    const itemButtonsActionRow = new ActionRowBuilder<ButtonBuilder>()
         .addComponents(
             new ButtonBuilder()
                 .setCustomId(`add_item_button:${id}`)
@@ -31,10 +31,10 @@ function createAddItemButton(id: string) {
             new ButtonBuilder()
                 .setCustomId(`delete_item_button:${id}`)
                 .setLabel('Delete Item(s)')
-                .setStyle(ButtonStyle.Secondary),
+                .setStyle(ButtonStyle.Danger),
         );
 
-    return addItemActionRow;
+    return itemButtonsActionRow;
 }
 
 function createAddItemModal(id: string) {
@@ -78,7 +78,43 @@ function createGroceryListContainer(groceryList: GroceryList, id: string) {
         container.addSectionComponents(createItemRow(item, id));
     }
 
-    container.addActionRowComponents(createAddItemButton(id));
+    container.addActionRowComponents(createItemButtons(id));
+
+    return container;
+}
+
+function createDeleteContainer(id: string) {
+    const container = new ContainerBuilder()
+        .addTextDisplayComponents(new TextDisplayBuilder().setContent(`**Delete Menu**`))
+        .addActionRowComponents(new ActionRowBuilder<ButtonBuilder>().addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`delete_selected_button:${id}`)
+                    .setLabel('Delete Selected')
+                    .setStyle(ButtonStyle.Danger)
+            )
+        )
+        .addActionRowComponents(new ActionRowBuilder<ButtonBuilder>().addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`delete_all_button:${id}`)
+                    .setLabel('Delete All')
+                    .setStyle(ButtonStyle.Danger)
+            )
+        )
+        .addActionRowComponents(new ActionRowBuilder<ButtonBuilder>().addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`delete_list_button:${id}`)
+                    .setLabel('Delete List')
+                    .setStyle(ButtonStyle.Danger),
+            )
+        )
+        .addActionRowComponents(
+            new ActionRowBuilder<ButtonBuilder>().addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`cancel_delete_button:${id}`)
+                    .setLabel('Cancel')
+                    .setStyle(ButtonStyle.Secondary),
+            )
+        );
 
     return container;
 }
@@ -135,6 +171,31 @@ export async function addItemButtonSubmit(buttonInteraction: ButtonInteraction) 
     await buttonInteraction.showModal(createAddItemModal(id));
 }
 
+export async function deleteItemButtonSubmit(buttonInteraction: ButtonInteraction, client: Client) {
+    const id = buttonInteraction.customId.split(':')[1];
+
+    const groceryList = groceryLists.get(id);
+
+    if (!id || !groceryList) {
+        await buttonInteraction.reply({
+            content: 'This grocery list no longer exists.',
+            flags: MessageFlags.Ephemeral,
+        });
+
+        return;
+    }
+
+    await buttonInteraction.deferUpdate();
+
+    const message = await fetchMessageByGroceryList(groceryList, client);
+
+    await message.edit({
+        components: [
+            createDeleteContainer(id)
+        ],
+    });
+}
+
 export async function addItemModalSubmit(modalSubmitInteraction: ModalSubmitInteraction, client: Client) {
     const id = modalSubmitInteraction.customId.split(':')[1];
 
@@ -162,17 +223,14 @@ export async function addItemModalSubmit(modalSubmitInteraction: ModalSubmitInte
         });
     }
 
+    await modalSubmitInteraction.deferUpdate();
+
     const message = await fetchMessageByGroceryList(groceryList, client);
 
     await message.edit({
         components: [
             createGroceryListContainer(groceryList, id)
         ],
-    });
-
-    await modalSubmitInteraction.reply({
-        content: 'Item added.',
-        flags: MessageFlags.Ephemeral,
     });
 }
 
@@ -197,6 +255,8 @@ export async function itemRowButtonSubmit(buttonInteraction: ButtonInteraction, 
 
     groceryItem.completed = !groceryItem.completed;
 
+    await buttonInteraction.deferUpdate();
+
     const message = await fetchMessageByGroceryList(groceryList, client);
 
     await message.edit({
@@ -204,6 +264,105 @@ export async function itemRowButtonSubmit(buttonInteraction: ButtonInteraction, 
             createGroceryListContainer(groceryList, id)
         ],
     });
+}
+
+export async function deleteSelectedButtonSubmit(buttonInteraction: ButtonInteraction, client: Client) {
+    const id = buttonInteraction.customId.split(':')[1];
+
+    const groceryList = groceryLists.get(id);
+
+    if (!id || !groceryList) {
+        await buttonInteraction.reply({
+            content: 'This grocery list no longer exists.',
+            flags: MessageFlags.Ephemeral,
+        });
+
+        return;
+    }
+
+    groceryList.items = groceryList.items.filter((item) => !item.completed);
 
     await buttonInteraction.deferUpdate();
+
+    const message = await fetchMessageByGroceryList(groceryList, client);
+
+    await message.edit({
+        components: [
+            createGroceryListContainer(groceryList, id)
+        ],
+    });
+}
+
+export async function deleteAllButtonSubmit(buttonInteraction: ButtonInteraction, client: Client) {
+    const id = buttonInteraction.customId.split(':')[1];
+
+    const groceryList = groceryLists.get(id);
+
+    if (!id || !groceryList) {
+        await buttonInteraction.reply({
+            content: 'This grocery list no longer exists.',
+            flags: MessageFlags.Ephemeral,
+        });
+
+        return;
+    }
+    
+    groceryList.items.length = 0;
+
+    await buttonInteraction.deferUpdate();
+
+    const message = await fetchMessageByGroceryList(groceryList, client);
+
+    await message.edit({
+        components: [
+            createGroceryListContainer(groceryList, id)
+        ],
+    });
+}
+
+export async function deleteListButtonSubmit(buttonInteraction: ButtonInteraction, client: Client) {
+    const id = buttonInteraction.customId.split(':')[1];
+
+    const groceryList = groceryLists.get(id);
+
+    if (!id || !groceryList) {
+        await buttonInteraction.reply({
+            content: 'This grocery list no longer exists.',
+            flags: MessageFlags.Ephemeral,
+        });
+
+        return;
+    }
+
+    await buttonInteraction.deferUpdate();
+
+    const message = await fetchMessageByGroceryList(groceryList, client);
+    await message.delete();
+
+    groceryLists.delete(id);
+}
+
+export async function cancelDeleteButtonSubmit(buttonInteraction: ButtonInteraction, client: Client) {
+    const id = buttonInteraction.customId.split(':')[1];
+
+    const groceryList = groceryLists.get(id);
+
+    if (!id || !groceryList) {
+        await buttonInteraction.reply({
+            content: 'This grocery list no longer exists.',
+            flags: MessageFlags.Ephemeral,
+        });
+
+        return;
+    }
+
+    await buttonInteraction.deferUpdate();
+
+    const message = await fetchMessageByGroceryList(groceryList, client);
+
+    await message.edit({
+        components: [
+            createGroceryListContainer(groceryList, id)
+        ],
+    });
 }
