@@ -1,4 +1,5 @@
 export type GroceryList = { 
+    id: string,
     title: string, 
     items: GroceryItem[],
     messageId: string,

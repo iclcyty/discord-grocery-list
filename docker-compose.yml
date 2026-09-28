@@ -1,0 +1,19 @@
+services:
+  localstack:
+    image: localstack/localstack:latest
+    container_name: grocery-list-localstack
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=dynamodb
+      - AWS_DEFAULT_REGION=ap-southeast-2
+      - DEBUG=0
+      - LOCALSTACK_AUTH_TOKEN=${LOCALSTACK_TOKEN}
+      - AWS_ACCESS_KEY_ID="test"
+      - AWS_SECRET_ACCESS_KEY="test"
+    volumes:
+      - localstack_data:/var/lib/localstack
+      - "./docker/init/localstack:/etc/localstack/init/ready.d"
+
+volumes:
+  localstack_data:

@@ -15,11 +15,97 @@ import {
     TextDisplayBuilder,
     ContainerBuilder,
 } from 'discord.js';
+import {
+    DynamoDBClient,
+} from '@aws-sdk/client-dynamodb';
+import {
+    DeleteCommand,
+    DynamoDBDocumentClient,
+    GetCommand,
+    PutCommand,
+    UpdateCommand,
+} from '@aws-sdk/lib-dynamodb';
 import { GroceryList, GroceryItem } from '../types/grocery-list.js';
 import { randomUUID } from 'node:crypto';
+import dotenv from 'dotenv';
 
-const groceryLists = new Map<string, GroceryList>();
-let groceryListCount = 0;
+dotenv.config();
+ 
+const dynamoDBClient = new DynamoDBClient({
+    region: "ap-southeast-2",
+    ...(process.env.DYNAMODB_ENDPOINT && {
+        endpoint: process.env.DYNAMODB_ENDPOINT,
+        credentials: {
+            accessKeyId: "test",
+            secretAccessKey: "test",
+        }
+    }),
+});
+
+const dynamoDB = DynamoDBDocumentClient.from(dynamoDBClient);
+
+const tableName = "grocery-lists";
+
+async function saveGroceryList(groceryList: GroceryList) {
+    await dynamoDB.send(
+        new PutCommand({
+            TableName: tableName,
+            Item: {
+                id: groceryList.id,
+                title: groceryList.title,
+                items: groceryList.items,
+                messageId: groceryList.messageId,
+                channelId: groceryList.channelId,
+            },
+        }),
+    );
+}
+
+async function getGroceryList(id: string) {
+    const result = await dynamoDB.send(
+        new GetCommand({
+            TableName: tableName,
+            Key: {
+                id,
+            },
+        }),
+    );
+
+    return result.Item as GroceryList | undefined;
+}
+
+async function deleteGroceryList(id: string) {
+    await dynamoDB.send(
+        new DeleteCommand({
+            TableName: tableName,
+            Key: {
+                id,
+            },
+        }),
+    );
+}
+
+async function incrementGroceryListCount() {
+    const result = await dynamoDB.send(
+        new UpdateCommand({
+            TableName: tableName,
+            Key: {
+                id: '__counter__',
+            },
+            UpdateExpression: 'SET #count = if_not_exists(#count, :zero) + :one',
+            ExpressionAttributeNames: {
+                '#count': 'count',
+            },
+            ExpressionAttributeValues: {
+                ':zero': 0,
+                ':one': 1,
+            },
+            ReturnValues: 'UPDATED_NEW',
+        }),
+    );
+
+    return Number(result.Attributes?.count);
+}
 
 function createItemButtons(id: string) {
     const itemButtonsActionRow = new ActionRowBuilder<ButtonBuilder>()
@@ -130,8 +216,11 @@ async function fetchMessageByGroceryList(groceryList: GroceryList, client: Clien
 }
 
 export async function createGroceryList(chatInputCommandInteraction: ChatInputCommandInteraction) {
+    const counter = await incrementGroceryListCount();
+
     const groceryList: GroceryList = {
-        title: `Grocery List #${++groceryListCount}`,
+        id: chatInputCommandInteraction.id,
+        title: `Grocery List #${counter}`,
         items: [],
         messageId: '',
         channelId: chatInputCommandInteraction.channelId,
@@ -153,13 +242,15 @@ export async function createGroceryList(chatInputCommandInteraction: ChatInputCo
 
     groceryList.messageId = messageId;
 
-    groceryLists.set(chatInputCommandInteraction.id, groceryList);
+    await saveGroceryList(groceryList);
 }
 
 export async function addItemButtonSubmit(buttonInteraction: ButtonInteraction) {
     const id = buttonInteraction.customId.split(':')[1];
     
-    if (!id || !groceryLists.has(id)) {
+    const groceryList = await getGroceryList(id);
+
+    if (!id || !groceryList) {
         await buttonInteraction.reply({
             content: 'This grocery list no longer exists.',
             flags: MessageFlags.Ephemeral,
@@ -174,7 +265,7 @@ export async function addItemButtonSubmit(buttonInteraction: ButtonInteraction) 
 export async function deleteItemButtonSubmit(buttonInteraction: ButtonInteraction, client: Client) {
     const id = buttonInteraction.customId.split(':')[1];
 
-    const groceryList = groceryLists.get(id);
+    const groceryList = await getGroceryList(id);
 
     if (!id || !groceryList) {
         await buttonInteraction.reply({
@@ -199,7 +290,7 @@ export async function deleteItemButtonSubmit(buttonInteraction: ButtonInteractio
 export async function addItemModalSubmit(modalSubmitInteraction: ModalSubmitInteraction, client: Client) {
     const id = modalSubmitInteraction.customId.split(':')[1];
 
-    const groceryList = groceryLists.get(id);
+    const groceryList = await getGroceryList(id);
 
     if (!id || !groceryList) {
         await modalSubmitInteraction.reply({
@@ -225,6 +316,8 @@ export async function addItemModalSubmit(modalSubmitInteraction: ModalSubmitInte
 
     await modalSubmitInteraction.deferUpdate();
 
+    await saveGroceryList(groceryList);
+
     const message = await fetchMessageByGroceryList(groceryList, client);
 
     await message.edit({
@@ -242,7 +335,7 @@ export async function itemRowButtonSubmit(buttonInteraction: ButtonInteraction, 
     console.log(id);
     console.log(itemId);
 
-    const groceryList = groceryLists.get(id);
+    const groceryList = await getGroceryList(id);
     const groceryItem = groceryList?.items.find((groceryItem) => groceryItem.id === itemId);
 
     if (!groceryList || !groceryItem) { 
@@ -257,6 +350,8 @@ export async function itemRowButtonSubmit(buttonInteraction: ButtonInteraction, 
 
     await buttonInteraction.deferUpdate();
 
+    await saveGroceryList(groceryList);
+
     const message = await fetchMessageByGroceryList(groceryList, client);
 
     await message.edit({
@@ -269,7 +364,7 @@ export async function itemRowButtonSubmit(buttonInteraction: ButtonInteraction, 
 export async function deleteSelectedButtonSubmit(buttonInteraction: ButtonInteraction, client: Client) {
     const id = buttonInteraction.customId.split(':')[1];
 
-    const groceryList = groceryLists.get(id);
+    const groceryList = await getGroceryList(id);
 
     if (!id || !groceryList) {
         await buttonInteraction.reply({
@@ -284,6 +379,8 @@ export async function deleteSelectedButtonSubmit(buttonInteraction: ButtonIntera
 
     await buttonInteraction.deferUpdate();
 
+    await saveGroceryList(groceryList);
+
     const message = await fetchMessageByGroceryList(groceryList, client);
 
     await message.edit({
@@ -296,7 +393,7 @@ export async function deleteSelectedButtonSubmit(buttonInteraction: ButtonIntera
 export async function deleteAllButtonSubmit(buttonInteraction: ButtonInteraction, client: Client) {
     const id = buttonInteraction.customId.split(':')[1];
 
-    const groceryList = groceryLists.get(id);
+    const groceryList = await getGroceryList(id);
 
     if (!id || !groceryList) {
         await buttonInteraction.reply({
@@ -311,6 +408,8 @@ export async function deleteAllButtonSubmit(buttonInteraction: ButtonInteraction
 
     await buttonInteraction.deferUpdate();
 
+    await saveGroceryList(groceryList);
+
     const message = await fetchMessageByGroceryList(groceryList, client);
 
     await message.edit({
@@ -323,7 +422,7 @@ export async function deleteAllButtonSubmit(buttonInteraction: ButtonInteraction
 export async function deleteListButtonSubmit(buttonInteraction: ButtonInteraction, client: Client) {
     const id = buttonInteraction.customId.split(':')[1];
 
-    const groceryList = groceryLists.get(id);
+    const groceryList = await getGroceryList(id);
 
     if (!id || !groceryList) {
         await buttonInteraction.reply({
@@ -339,13 +438,13 @@ export async function deleteListButtonSubmit(buttonInteraction: ButtonInteractio
     const message = await fetchMessageByGroceryList(groceryList, client);
     await message.delete();
 
-    groceryLists.delete(id);
+    await deleteGroceryList(id);
 }
 
 export async function cancelDeleteButtonSubmit(buttonInteraction: ButtonInteraction, client: Client) {
     const id = buttonInteraction.customId.split(':')[1];
 
-    const groceryList = groceryLists.get(id);
+    const groceryList = await getGroceryList(id);
 
     if (!id || !groceryList) {
         await buttonInteraction.reply({
